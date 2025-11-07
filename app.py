@@ -180,6 +180,12 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
     scan_c_results = []
     scan_d_results = []
     
+    # Track which tickers meet each criterion
+    tickers_with_surge = set()
+    tickers_with_gap = set()
+    tickers_with_uptrend = set()
+    tickers_with_volume = set()
+    
     progress_bar = st.progress(0)
     status_text = st.empty()
     
@@ -202,6 +208,8 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
         
         # Perform scans
         surge_results = scan_price_surge(scan_data)
+        if surge_results:
+            tickers_with_surge.add(ticker)
         for date, pct_change, price in surge_results:
             scan_a_results.append({
                 'Ticker': ticker,
@@ -212,6 +220,8 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
             })
         
         gap_results = scan_upward_gap(scan_data)
+        if gap_results:
+            tickers_with_gap.add(ticker)
         for date, gap_pct, price in gap_results:
             scan_b_results.append({
                 'Ticker': ticker,
@@ -222,6 +232,8 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
             })
         
         uptrend_results = scan_continuous_uptrend(scan_data)
+        if uptrend_results:
+            tickers_with_uptrend.add(ticker)
         for date, num_days, price in uptrend_results:
             scan_c_results.append({
                 'Ticker': ticker,
@@ -233,8 +245,10 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
         
         volume_results = scan_volume_breakout(data)
         # Filter volume results to scan period
+        volume_found = False
         for date, volume_ratio, volume in volume_results:
             if pd.Timestamp(date) >= scan_start_date:
+                volume_found = True
                 scan_d_results.append({
                     'Ticker': ticker,
                     'Date': date,
@@ -242,6 +256,8 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
                     'Volume': int(volume),
                     'Price': f"${scan_data.loc[date, 'Close']:.2f}" if date in scan_data.index else 'N/A'
                 })
+        if volume_found:
+            tickers_with_volume.add(ticker)
         
         # Add small delay to avoid rate limiting
         time.sleep(0.1)
@@ -249,11 +265,42 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
     progress_bar.empty()
     status_text.empty()
     
+    # Find stocks that meet ALL four criteria
+    all_criteria_tickers = (tickers_with_surge & tickers_with_gap & 
+                           tickers_with_uptrend & tickers_with_volume)
+    
+    # Create combined results
+    combined_results = []
+    for ticker in sorted(all_criteria_tickers):
+        # Get the most recent data for this ticker
+        latest_price = 'N/A'
+        latest_volume = 'N/A'
+        
+        # Try to get latest info from scan results
+        for result in scan_a_results:
+            if result['Ticker'] == ticker:
+                latest_price = result['Close Price']
+                break
+        
+        for result in scan_d_results:
+            if result['Ticker'] == ticker:
+                latest_volume = result['Volume']
+                break
+        
+        combined_results.append({
+            'Ticker': ticker,
+            'Price': latest_price,
+            'Volume': latest_volume,
+            'Criteria Met': 'All 4',
+            'Yahoo Finance': f"https://finance.yahoo.com/quote/{ticker}"
+        })
+    
     return {
         'Scan A: Price Surge (>5%)': pd.DataFrame(scan_a_results),
         'Scan B: Upward Gap': pd.DataFrame(scan_b_results),
         'Scan C: Continuous Uptrend (≥4 days)': pd.DataFrame(scan_c_results),
-        'Scan D: Volume Breakout': pd.DataFrame(scan_d_results)
+        'Scan D: Volume Breakout': pd.DataFrame(scan_d_results),
+        'Combined: All 4 Criteria': pd.DataFrame(combined_results)
     }
 
 
@@ -325,7 +372,7 @@ def main():
         
         # Summary statistics
         st.subheader("📊 Summary Statistics")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             st.metric("Price Surge Signals", len(results['Scan A: Price Surge (>5%)']))
@@ -335,11 +382,14 @@ def main():
             st.metric("Uptrend Signals", len(results['Scan C: Continuous Uptrend (≥4 days)']))
         with col4:
             st.metric("Volume Breakout Signals", len(results['Scan D: Volume Breakout']))
+        with col5:
+            st.metric("⭐ All 4 Criteria", len(results['Combined: All 4 Criteria']), delta="Premium Picks")
         
         # Display results in tabs
         st.subheader("🔍 Detailed Results")
         
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "⭐ All 4 Criteria",
             "Scan A: Price Surge",
             "Scan B: Upward Gap",
             "Scan C: Continuous Uptrend",
@@ -347,6 +397,42 @@ def main():
         ])
         
         with tab1:
+            st.markdown("**🎯 Premium Picks: Stocks Meeting ALL Four Criteria**")
+            st.markdown("These stocks show strong signals across all technical indicators:")
+            st.markdown("- ✅ Price Surge (>5%)")
+            st.markdown("- ✅ Upward Gap (>1%)")
+            st.markdown("- ✅ Continuous Uptrend (≥4 days)")
+            st.markdown("- ✅ Volume Breakout (>10% above average)")
+            st.markdown("---")
+            
+            df_combined = results['Combined: All 4 Criteria']
+            if not df_combined.empty:
+                st.success(f"🎉 Found {len(df_combined)} stocks meeting all criteria!")
+                st.dataframe(df_combined, use_container_width=True)
+                
+                # Download button for combined results
+                csv_combined = df_combined.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Premium Picks as CSV",
+                    data=csv_combined,
+                    file_name=f"all_criteria_{current_date}.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
+                
+                # Also create a simple ticker-only CSV
+                ticker_only_csv = df_combined[['Ticker']].to_csv(index=False)
+                st.download_button(
+                    label="📋 Download Ticker List Only",
+                    data=ticker_only_csv,
+                    file_name=f"tickers_all_criteria_{current_date}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No stocks found meeting all four criteria in this scan period.")
+                st.info("💡 Tip: Try increasing the scan period or selecting 'All US Markets' for better results.")
+        
+        with tab2:
             st.markdown("**Stocks with single-day price increase >5%**")
             df_a = results['Scan A: Price Surge (>5%)']
             if not df_a.empty:
@@ -436,15 +522,20 @@ def main():
         3. **Continuous Uptrend**: Stocks with 4 or more consecutive days of higher closes
         4. **Volume Breakout**: Stocks with volume exceeding 10% above their 50-day average
         
+        ### ⭐ NEW: Premium Picks Feature!
+        The scanner now identifies **elite stocks that meet ALL FOUR criteria** simultaneously - 
+        these are the strongest technical signals!
+        
         #### How to Use:
         1. Set your scan parameters in the left sidebar
         2. Click the **Start Scan** button
-        3. View results in the tabs below
-        4. Download results as CSV files
+        3. Check the **"⭐ All 4 Criteria"** tab for premium picks
+        4. Download results as CSV files (full data or ticker list only)
         
         #### Tips:
         - Longer scan periods provide more signals but take longer to process
         - "All US Markets" option scans the most stocks but is slowest
+        - The "All 4 Criteria" tab shows only the highest-quality signals
         - Results include clickable links to Yahoo Finance for each stock
         """)
         
