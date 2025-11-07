@@ -204,7 +204,11 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
             continue
         
         # Filter data to scan period only for results
-        scan_data = data[data.index >= scan_start_date]
+        # Ensure scan_start_date is timezone-aware if data.index is timezone-aware
+        scan_start_compare = pd.Timestamp(scan_start_date)
+        if data.index.tz is not None:
+            scan_start_compare = scan_start_compare.tz_localize(data.index.tz)
+        scan_data = data[data.index >= scan_start_compare]
         
         # Perform scans
         surge_results = scan_price_surge(scan_data)
@@ -247,7 +251,10 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
         # Filter volume results to scan period
         volume_found = False
         for date, volume_ratio, volume in volume_results:
-            if pd.Timestamp(date) >= scan_start_date:
+            date_compare = pd.Timestamp(date)
+            if data.index.tz is not None and date_compare.tz is None:
+                date_compare = date_compare.tz_localize(data.index.tz)
+            if date_compare >= scan_start_compare:
                 volume_found = True
                 scan_d_results.append({
                     'Ticker': ticker,
@@ -328,8 +335,8 @@ def main():
         # Input 2: Stock Market
         market = st.selectbox(
             "Stock Market",
-            ["NASDAQ", "NYSE", "AMEX", "All US Markets"],
-            help="Select which market to scan"
+            ["S&P 500", "NASDAQ", "NYSE", "AMEX", "Russell 2000", "All US Markets"],
+            help="Select which market to scan. S&P 500 (~500 stocks), NASDAQ-100 (~100), Russell 2000 (~2000), All US Markets (~2500+)"
         )
         
         # Input 3: Current Date
