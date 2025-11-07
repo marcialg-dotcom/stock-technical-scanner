@@ -1,0 +1,466 @@
+"""
+Stock Scanner Dashboard - Streamlit Application
+Scans U.S. stocks based on technical criteria
+"""
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import List, Dict, Tuple
+import time
+from ticker_utils import get_tickers_by_market
+
+
+# Page configuration
+st.set_page_config(
+    page_title="Stock Technical Scanner",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+
+def fetch_stock_data(ticker: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+    """
+    Fetch historical stock data for a given ticker.
+    
+    Args:
+        ticker: Stock ticker symbol
+        start_date: Start date for data fetch
+        end_date: End date for data fetch
+    
+    Returns:
+        DataFrame with stock data or None if error
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(start=start_date, end=end_date)
+        
+        if data.empty or len(data) < 10:
+            return None
+        
+        return data
+    except Exception as e:
+        return None
+
+
+def scan_price_surge(data: pd.DataFrame, threshold: float = 0.05) -> List[Tuple[str, float, float]]:
+    """
+    Scan A: Single Day Price Surge (>5%)
+    
+    Args:
+        data: Stock price data
+        threshold: Percentage threshold (default 0.05 = 5%)
+    
+    Returns:
+        List of tuples (date, pct_change, close_price)
+    """
+    results = []
+    
+    if len(data) < 2:
+        return results
+    
+    data['PctChange'] = data['Close'].pct_change()
+    
+    for idx in range(1, len(data)):
+        pct_change = data['PctChange'].iloc[idx]
+        if pct_change > threshold:
+            date = data.index[idx].strftime('%Y-%m-%d')
+            close_price = data['Close'].iloc[idx]
+            results.append((date, pct_change * 100, close_price))
+    
+    return results
+
+
+def scan_upward_gap(data: pd.DataFrame, threshold: float = 0.01) -> List[Tuple[str, float, float]]:
+    """
+    Scan B: Upward Gap
+    
+    Args:
+        data: Stock price data
+        threshold: Gap threshold (default 0.01 = 1%)
+    
+    Returns:
+        List of tuples (date, gap_pct, open_price)
+    """
+    results = []
+    
+    if len(data) < 2:
+        return results
+    
+    for idx in range(1, len(data)):
+        prev_close = data['Close'].iloc[idx - 1]
+        curr_open = data['Open'].iloc[idx]
+        
+        if curr_open > prev_close * (1 + threshold):
+            date = data.index[idx].strftime('%Y-%m-%d')
+            gap_pct = ((curr_open - prev_close) / prev_close) * 100
+            results.append((date, gap_pct, curr_open))
+    
+    return results
+
+
+def scan_continuous_uptrend(data: pd.DataFrame, min_days: int = 4) -> List[Tuple[str, int, float]]:
+    """
+    Scan C: Continuous Uptrend (≥4 days)
+    
+    Args:
+        data: Stock price data
+        min_days: Minimum consecutive days (default 4)
+    
+    Returns:
+        List of tuples (end_date, num_days, end_price)
+    """
+    results = []
+    
+    if len(data) < min_days:
+        return results
+    
+    consecutive_days = 1
+    
+    for idx in range(1, len(data)):
+        if data['Close'].iloc[idx] > data['Close'].iloc[idx - 1]:
+            consecutive_days += 1
+            
+            if consecutive_days >= min_days:
+                date = data.index[idx].strftime('%Y-%m-%d')
+                close_price = data['Close'].iloc[idx]
+                results.append((date, consecutive_days, close_price))
+        else:
+            consecutive_days = 1
+    
+    return results
+
+
+def scan_volume_breakout(data: pd.DataFrame, lookback: int = 50, threshold: float = 0.10) -> List[Tuple[str, float, float]]:
+    """
+    Scan D: Volume Breakout
+    
+    Args:
+        data: Stock price data
+        lookback: Days to calculate average volume (default 50)
+        threshold: Volume increase threshold (default 0.10 = 10%)
+    
+    Returns:
+        List of tuples (date, volume_ratio, volume)
+    """
+    results = []
+    
+    if len(data) < lookback + 1:
+        return results
+    
+    for idx in range(lookback, len(data)):
+        avg_volume = data['Volume'].iloc[idx - lookback:idx].mean()
+        curr_volume = data['Volume'].iloc[idx]
+        
+        if curr_volume > avg_volume * (1 + threshold):
+            date = data.index[idx].strftime('%Y-%m-%d')
+            volume_ratio = (curr_volume / avg_volume - 1) * 100
+            results.append((date, volume_ratio, curr_volume))
+    
+    return results
+
+
+def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime, 
+                  scan_start_date: datetime) -> Dict[str, pd.DataFrame]:
+    """
+    Perform all four scans on the given tickers.
+    
+    Args:
+        tickers: List of ticker symbols
+        start_date: Start date for data fetch (includes buffer for calculations)
+        end_date: End date for data fetch
+        scan_start_date: Actual start date for scan results
+    
+    Returns:
+        Dictionary with scan results
+    """
+    scan_a_results = []
+    scan_b_results = []
+    scan_c_results = []
+    scan_d_results = []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    total_tickers = len(tickers)
+    
+    for i, ticker in enumerate(tickers):
+        # Update progress
+        progress = (i + 1) / total_tickers
+        progress_bar.progress(progress)
+        status_text.text(f"Scanning {ticker}... ({i + 1}/{total_tickers})")
+        
+        # Fetch data
+        data = fetch_stock_data(ticker, start_date, end_date)
+        
+        if data is None:
+            continue
+        
+        # Filter data to scan period only for results
+        scan_data = data[data.index >= scan_start_date]
+        
+        # Perform scans
+        surge_results = scan_price_surge(scan_data)
+        for date, pct_change, price in surge_results:
+            scan_a_results.append({
+                'Ticker': ticker,
+                'Date': date,
+                'Price Change (%)': f"{pct_change:.2f}",
+                'Close Price': f"${price:.2f}",
+                'Volume': int(scan_data.loc[date, 'Volume']) if date in scan_data.index else 'N/A'
+            })
+        
+        gap_results = scan_upward_gap(scan_data)
+        for date, gap_pct, price in gap_results:
+            scan_b_results.append({
+                'Ticker': ticker,
+                'Date': date,
+                'Gap (%)': f"{gap_pct:.2f}",
+                'Open Price': f"${price:.2f}",
+                'Volume': int(scan_data.loc[date, 'Volume']) if date in scan_data.index else 'N/A'
+            })
+        
+        uptrend_results = scan_continuous_uptrend(scan_data)
+        for date, num_days, price in uptrend_results:
+            scan_c_results.append({
+                'Ticker': ticker,
+                'End Date': date,
+                'Consecutive Days': num_days,
+                'Close Price': f"${price:.2f}",
+                'Volume': int(scan_data.loc[date, 'Volume']) if date in scan_data.index else 'N/A'
+            })
+        
+        volume_results = scan_volume_breakout(data)
+        # Filter volume results to scan period
+        for date, volume_ratio, volume in volume_results:
+            if pd.Timestamp(date) >= scan_start_date:
+                scan_d_results.append({
+                    'Ticker': ticker,
+                    'Date': date,
+                    'Volume Increase (%)': f"{volume_ratio:.2f}",
+                    'Volume': int(volume),
+                    'Price': f"${scan_data.loc[date, 'Close']:.2f}" if date in scan_data.index else 'N/A'
+                })
+        
+        # Add small delay to avoid rate limiting
+        time.sleep(0.1)
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    return {
+        'Scan A: Price Surge (>5%)': pd.DataFrame(scan_a_results),
+        'Scan B: Upward Gap': pd.DataFrame(scan_b_results),
+        'Scan C: Continuous Uptrend (≥4 days)': pd.DataFrame(scan_c_results),
+        'Scan D: Volume Breakout': pd.DataFrame(scan_d_results)
+    }
+
+
+def main():
+    """Main application function."""
+    
+    # Title
+    st.title("📈 Stock Technical Scanner")
+    st.markdown("Scan U.S. stocks based on technical criteria")
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("🔍 Scan Parameters")
+        
+        # Input 1: Number of Days to Scan
+        scan_days = st.number_input(
+            "Number of Days to Scan",
+            min_value=5,
+            max_value=60,
+            value=20,
+            step=1,
+            help="Number of trading days to scan for signals"
+        )
+        
+        # Input 2: Stock Market
+        market = st.selectbox(
+            "Stock Market",
+            ["NASDAQ", "NYSE", "AMEX", "All US Markets"],
+            help="Select which market to scan"
+        )
+        
+        # Input 3: Current Date
+        current_date = st.date_input(
+            "Current Date",
+            value=datetime.now(),
+            help="End date for the scan period"
+        )
+        
+        # Scan button
+        scan_button = st.button("🚀 Start Scan", type="primary", use_container_width=True)
+    
+    # Main area
+    if scan_button:
+        # Calculate dates
+        end_date = datetime.combine(current_date, datetime.min.time())
+        start_date = end_date - timedelta(days=scan_days + 55)  # Add buffer for 50-day volume calculation
+        scan_start_date = end_date - timedelta(days=scan_days)
+        
+        # Get tickers
+        st.info(f"Fetching {market} tickers...")
+        tickers = get_tickers_by_market(market)
+        
+        if not tickers:
+            st.error("No tickers found for the selected market.")
+            return
+        
+        st.success(f"Found {len(tickers)} tickers to scan")
+        
+        # Display date range
+        st.info(f"📅 Scan Period: {scan_start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        st.info(f"📊 Data Fetch Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} (includes 55-day buffer)")
+        
+        # Perform scans
+        st.subheader("Scanning in Progress...")
+        results = perform_scans(tickers, start_date, end_date, scan_start_date)
+        
+        # Display results
+        st.success("✅ Scan Complete!")
+        
+        # Summary statistics
+        st.subheader("📊 Summary Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Price Surge Signals", len(results['Scan A: Price Surge (>5%)']))
+        with col2:
+            st.metric("Upward Gap Signals", len(results['Scan B: Upward Gap']))
+        with col3:
+            st.metric("Uptrend Signals", len(results['Scan C: Continuous Uptrend (≥4 days)']))
+        with col4:
+            st.metric("Volume Breakout Signals", len(results['Scan D: Volume Breakout']))
+        
+        # Display results in tabs
+        st.subheader("🔍 Detailed Results")
+        
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Scan A: Price Surge",
+            "Scan B: Upward Gap",
+            "Scan C: Continuous Uptrend",
+            "Scan D: Volume Breakout"
+        ])
+        
+        with tab1:
+            st.markdown("**Stocks with single-day price increase >5%**")
+            df_a = results['Scan A: Price Surge (>5%)']
+            if not df_a.empty:
+                # Add Yahoo Finance links
+                df_a['Yahoo Finance'] = df_a['Ticker'].apply(
+                    lambda x: f"https://finance.yahoo.com/quote/{x}"
+                )
+                st.dataframe(df_a, use_container_width=True)
+                
+                # Download button
+                csv_a = df_a.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv_a,
+                    file_name=f"price_surge_{current_date}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No stocks found matching this criterion.")
+        
+        with tab2:
+            st.markdown("**Stocks with upward gap >1%**")
+            df_b = results['Scan B: Upward Gap']
+            if not df_b.empty:
+                df_b['Yahoo Finance'] = df_b['Ticker'].apply(
+                    lambda x: f"https://finance.yahoo.com/quote/{x}"
+                )
+                st.dataframe(df_b, use_container_width=True)
+                
+                csv_b = df_b.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv_b,
+                    file_name=f"upward_gap_{current_date}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No stocks found matching this criterion.")
+        
+        with tab3:
+            st.markdown("**Stocks with continuous uptrend ≥4 days**")
+            df_c = results['Scan C: Continuous Uptrend (≥4 days)']
+            if not df_c.empty:
+                df_c['Yahoo Finance'] = df_c['Ticker'].apply(
+                    lambda x: f"https://finance.yahoo.com/quote/{x}"
+                )
+                st.dataframe(df_c, use_container_width=True)
+                
+                csv_c = df_c.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv_c,
+                    file_name=f"continuous_uptrend_{current_date}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No stocks found matching this criterion.")
+        
+        with tab4:
+            st.markdown("**Stocks with volume >10% above 50-day average**")
+            df_d = results['Scan D: Volume Breakout']
+            if not df_d.empty:
+                df_d['Yahoo Finance'] = df_d['Ticker'].apply(
+                    lambda x: f"https://finance.yahoo.com/quote/{x}"
+                )
+                st.dataframe(df_d, use_container_width=True)
+                
+                csv_d = df_d.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv_d,
+                    file_name=f"volume_breakout_{current_date}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No stocks found matching this criterion.")
+    
+    else:
+        # Initial state - show instructions
+        st.markdown("""
+        ### Welcome to the Stock Technical Scanner! 👋
+        
+        This dashboard helps you identify stocks based on four technical criteria:
+        
+        1. **Price Surge (>5%)**: Stocks with single-day price increase exceeding 5%
+        2. **Upward Gap**: Stocks that opened more than 1% above previous close
+        3. **Continuous Uptrend**: Stocks with 4 or more consecutive days of higher closes
+        4. **Volume Breakout**: Stocks with volume exceeding 10% above their 50-day average
+        
+        #### How to Use:
+        1. Set your scan parameters in the left sidebar
+        2. Click the **Start Scan** button
+        3. View results in the tabs below
+        4. Download results as CSV files
+        
+        #### Tips:
+        - Longer scan periods provide more signals but take longer to process
+        - "All US Markets" option scans the most stocks but is slowest
+        - Results include clickable links to Yahoo Finance for each stock
+        """)
+        
+        # Display sample data structure
+        st.subheader("📋 Sample Output Format")
+        
+        sample_data = pd.DataFrame({
+            'Ticker': ['AAPL', 'MSFT', 'GOOGL'],
+            'Date': ['2024-01-15', '2024-01-16', '2024-01-17'],
+            'Signal Strength': ['6.5%', '5.8%', '7.2%'],
+            'Price': ['$185.50', '$405.20', '$142.80'],
+            'Volume': ['75,234,100', '28,456,200', '32,145,800']
+        })
+        
+        st.dataframe(sample_data, use_container_width=True)
+
+
+if __name__ == "__main__":
+    main()
