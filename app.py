@@ -192,6 +192,12 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
     total_tickers = len(tickers)
     
     for i, ticker in enumerate(tickers):
+        # Check if stop was requested
+        if st.session_state.get('stop_requested', False):
+            status_text.text(f"⏹️ Scan stopped by user at {i}/{total_tickers} stocks")
+            st.warning(f"⚠️ Scan interrupted! Processed {i} out of {total_tickers} stocks.")
+            break
+        
         # Update progress
         progress = (i + 1) / total_tickers
         progress_bar.progress(progress)
@@ -346,8 +352,51 @@ def main():
             help="End date for the scan period"
         )
         
+        # Input 4: Alphabetical Filter
+        st.markdown("---")
+        st.subheader("🔤 Ticker Filter (Optional)")
+        
+        enable_alpha_filter = st.checkbox(
+            "Enable Alphabetical Filtering",
+            value=False,
+            help="Filter tickers by starting letter to reduce scan size"
+        )
+        
+        if enable_alpha_filter:
+            alpha_range = st.selectbox(
+                "Ticker Range",
+                [
+                    "All (A-Z)",
+                    "A-C",
+                    "D-F",
+                    "G-I",
+                    "J-L",
+                    "M-O",
+                    "P-R",
+                    "S-U",
+                    "V-Z"
+                ],
+                help="Select which alphabetical range of tickers to scan"
+            )
+        else:
+            alpha_range = "All (A-Z)"
+        
+        st.markdown("---")
+        
         # Scan button
         scan_button = st.button("🚀 Start Scan", type="primary", use_container_width=True)
+        
+        # Stop button (will be shown during scan)
+        if 'scanning' not in st.session_state:
+            st.session_state.scanning = False
+        
+        if st.session_state.scanning:
+            stop_button = st.button("⏹️ Stop Scan", type="secondary", use_container_width=True)
+            if stop_button:
+                st.session_state.stop_requested = True
+                st.warning("Stop requested. Scan will halt after current stock...")
+        else:
+            st.session_state.stop_requested = False
     
     # Main area
     if scan_button:
@@ -356,15 +405,42 @@ def main():
         start_date = end_date - timedelta(days=scan_days + 55)  # Add buffer for 50-day volume calculation
         scan_start_date = end_date - timedelta(days=scan_days)
         
+        # Set scanning state
+        st.session_state.scanning = True
+        st.session_state.stop_requested = False
+        
         # Get tickers
         st.info(f"Fetching {market} tickers...")
         tickers = get_tickers_by_market(market)
         
         if not tickers:
             st.error("No tickers found for the selected market.")
+            st.session_state.scanning = False
             return
         
-        st.success(f"Found {len(tickers)} tickers to scan")
+        # Apply alphabetical filter if enabled
+        if alpha_range != "All (A-Z)":
+            original_count = len(tickers)
+            
+            # Define range mapping
+            range_map = {
+                "A-C": ('A', 'D'),
+                "D-F": ('D', 'G'),
+                "G-I": ('G', 'J'),
+                "J-L": ('J', 'M'),
+                "M-O": ('M', 'P'),
+                "P-R": ('P', 'S'),
+                "S-U": ('S', 'V'),
+                "V-Z": ('V', '[')
+            }
+            
+            if alpha_range in range_map:
+                start_letter, end_letter = range_map[alpha_range]
+                tickers = [t for t in tickers if start_letter <= t[0].upper() < end_letter]
+                st.info(f"🔤 Alphabetical Filter Applied: {alpha_range}")
+                st.info(f"   Filtered from {original_count} to {len(tickers)} tickers")
+        
+        st.success(f"✓ Found {len(tickers)} tickers to scan")
         
         # Display date range
         st.info(f"📅 Scan Period: {scan_start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
@@ -373,6 +449,10 @@ def main():
         # Perform scans
         st.subheader("Scanning in Progress...")
         results = perform_scans(tickers, start_date, end_date, scan_start_date)
+        
+        # Reset scanning state
+        st.session_state.scanning = False
+        st.session_state.stop_requested = False
         
         # Display results
         st.success("✅ Scan Complete!")
