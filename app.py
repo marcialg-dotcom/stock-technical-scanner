@@ -10,6 +10,12 @@ from typing import List, Dict, Tuple
 import time
 from ticker_utils import get_tickers_by_market
 
+# Import scanner libraries
+from scanners.scan_price_surge import scan_price_surge
+from scanners.scan_upward_gap import scan_upward_gap
+from scanners.scan_continuous_uptrend import scan_continuous_uptrend
+from scanners.scan_volume_breakout import scan_volume_breakout
+
 
 # Page configuration
 st.set_page_config(
@@ -44,121 +50,11 @@ def fetch_stock_data(ticker: str, start_date: datetime, end_date: datetime) -> p
         return None
 
 
-def scan_price_surge(data: pd.DataFrame, threshold: float = 0.05) -> List[Tuple[str, float, float]]:
-    """
-    Scan A: Single Day Price Surge (>5%)
-    
-    Args:
-        data: Stock price data
-        threshold: Percentage threshold (default 0.05 = 5%)
-    
-    Returns:
-        List of tuples (date, pct_change, close_price)
-    """
-    results = []
-    
-    if len(data) < 2:
-        return results
-    
-    data['PctChange'] = data['Close'].pct_change()
-    
-    for idx in range(1, len(data)):
-        pct_change = data['PctChange'].iloc[idx]
-        if pct_change > threshold:
-            date = data.index[idx].strftime('%Y-%m-%d')
-            close_price = data['Close'].iloc[idx]
-            results.append((date, pct_change * 100, close_price))
-    
-    return results
-
-
-def scan_upward_gap(data: pd.DataFrame, threshold: float = 0.01) -> List[Tuple[str, float, float]]:
-    """
-    Scan B: Upward Gap
-    
-    Args:
-        data: Stock price data
-        threshold: Gap threshold (default 0.01 = 1%)
-    
-    Returns:
-        List of tuples (date, gap_pct, open_price)
-    """
-    results = []
-    
-    if len(data) < 2:
-        return results
-    
-    for idx in range(1, len(data)):
-        prev_close = data['Close'].iloc[idx - 1]
-        curr_open = data['Open'].iloc[idx]
-        
-        if curr_open > prev_close * (1 + threshold):
-            date = data.index[idx].strftime('%Y-%m-%d')
-            gap_pct = ((curr_open - prev_close) / prev_close) * 100
-            results.append((date, gap_pct, curr_open))
-    
-    return results
-
-
-def scan_continuous_uptrend(data: pd.DataFrame, min_days: int = 4) -> List[Tuple[str, int, float]]:
-    """
-    Scan C: Continuous Uptrend (≥4 days)
-    
-    Args:
-        data: Stock price data
-        min_days: Minimum consecutive days (default 4)
-    
-    Returns:
-        List of tuples (end_date, num_days, end_price)
-    """
-    results = []
-    
-    if len(data) < min_days:
-        return results
-    
-    consecutive_days = 1
-    
-    for idx in range(1, len(data)):
-        if data['Close'].iloc[idx] > data['Close'].iloc[idx - 1]:
-            consecutive_days += 1
-            
-            if consecutive_days >= min_days:
-                date = data.index[idx].strftime('%Y-%m-%d')
-                close_price = data['Close'].iloc[idx]
-                results.append((date, consecutive_days, close_price))
-        else:
-            consecutive_days = 1
-    
-    return results
-
-
-def scan_volume_breakout(data: pd.DataFrame, lookback: int = 50, threshold: float = 0.10) -> List[Tuple[str, float, float]]:
-    """
-    Scan D: Volume Breakout
-    
-    Args:
-        data: Stock price data
-        lookback: Days to calculate average volume (default 50)
-        threshold: Volume increase threshold (default 0.10 = 10%)
-    
-    Returns:
-        List of tuples (date, volume_ratio, volume)
-    """
-    results = []
-    
-    if len(data) < lookback + 1:
-        return results
-    
-    for idx in range(lookback, len(data)):
-        avg_volume = data['Volume'].iloc[idx - lookback:idx].mean()
-        curr_volume = data['Volume'].iloc[idx]
-        
-        if curr_volume > avg_volume * (1 + threshold):
-            date = data.index[idx].strftime('%Y-%m-%d')
-            volume_ratio = (curr_volume / avg_volume - 1) * 100
-            results.append((date, volume_ratio, curr_volume))
-    
-    return results
+# Scan functions are now imported from scanners package
+# See scanners/scan_price_surge.py
+# See scanners/scan_upward_gap.py
+# See scanners/scan_continuous_uptrend.py
+# See scanners/scan_volume_breakout.py
 
 
 def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime, 
