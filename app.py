@@ -419,14 +419,21 @@ def main():
         st.subheader("📊 Summary Statistics")
         col1, col2, col3, col4, col5 = st.columns(5)
         
+        # Get dynamic keys from results
+        result_keys = list(results.keys())
+        scan_a_key = [k for k in result_keys if k.startswith('Scan A:')][0]
+        scan_b_key = [k for k in result_keys if k.startswith('Scan B:')][0]
+        scan_c_key = [k for k in result_keys if k.startswith('Scan C:')][0]
+        scan_d_key = [k for k in result_keys if k.startswith('Scan D:')][0]
+        
         with col1:
-            st.metric("Price Surge Signals", len(results['Scan A: Price Surge (>5%)']))
+            st.metric("Price Surge Signals", len(results[scan_a_key]))
         with col2:
-            st.metric("Upward Gap Signals", len(results['Scan B: Upward Gap']))
+            st.metric("Upward Gap Signals", len(results[scan_b_key]))
         with col3:
-            st.metric("Uptrend Signals", len(results['Scan C: Continuous Uptrend (≥4 days)']))
+            st.metric("Uptrend Signals", len(results[scan_c_key]))
         with col4:
-            st.metric("Volume Breakout Signals", len(results['Scan D: Volume Breakout']))
+            st.metric("Volume Breakout Signals", len(results[scan_d_key]))
         with col5:
             st.metric("⭐ All 4 Criteria", len(results['Combined: All 4 Criteria']), delta="Premium Picks")
         
@@ -444,10 +451,10 @@ def main():
         with tab1:
             st.markdown("**🎯 Premium Picks: Stocks Meeting ALL Four Criteria**")
             st.markdown("These stocks show strong signals across all technical indicators:")
-            st.markdown("- ✅ Price Surge (>5%)")
-            st.markdown("- ✅ Upward Gap (>1%)")
-            st.markdown("- ✅ Continuous Uptrend (≥4 days)")
-            st.markdown("- ✅ Volume Breakout (>10% above average)")
+            st.markdown(f"- ✅ {scan_a_key}")
+            st.markdown(f"- ✅ {scan_b_key}")
+            st.markdown(f"- ✅ {scan_c_key}")
+            st.markdown(f"- ✅ {scan_d_key}")
             st.markdown("---")
             
             df_combined = results['Combined: All 4 Criteria']
@@ -478,8 +485,8 @@ def main():
                 st.info("💡 Tip: Try increasing the scan period or selecting 'All US Markets' for better results.")
         
         with tab2:
-            st.markdown("**Stocks with single-day price increase >5%**")
-            df_a = results['Scan A: Price Surge (>5%)']
+            st.markdown(f"**{scan_a_key}**")
+            df_a = results[scan_a_key]
             if not df_a.empty:
                 # Add Yahoo Finance links
                 df_a['Yahoo Finance'] = df_a['Ticker'].apply(
@@ -498,9 +505,9 @@ def main():
             else:
                 st.info("No stocks found matching this criterion.")
         
-        with tab2:
-            st.markdown("**Stocks with upward gap >1%**")
-            df_b = results['Scan B: Upward Gap']
+        with tab3:
+            st.markdown(f"**{scan_b_key}**")
+            df_b = results[scan_b_key]
             if not df_b.empty:
                 df_b['Yahoo Finance'] = df_b['Ticker'].apply(
                     lambda x: f"https://finance.yahoo.com/quote/{x}"
@@ -517,9 +524,9 @@ def main():
             else:
                 st.info("No stocks found matching this criterion.")
         
-        with tab3:
-            st.markdown("**Stocks with continuous uptrend ≥4 days**")
-            df_c = results['Scan C: Continuous Uptrend (≥4 days)']
+        with tab4:
+            st.markdown(f"**{scan_c_key}**")
+            df_c = results[scan_c_key]
             if not df_c.empty:
                 df_c['Yahoo Finance'] = df_c['Ticker'].apply(
                     lambda x: f"https://finance.yahoo.com/quote/{x}"
@@ -536,9 +543,9 @@ def main():
             else:
                 st.info("No stocks found matching this criterion.")
         
-        with tab4:
-            st.markdown("**Stocks with volume >10% above 50-day average**")
-            df_d = results['Scan D: Volume Breakout']
+        with tab5:
+            st.markdown(f"**{scan_d_key}**")
+            df_d = results[scan_d_key]
             if not df_d.empty:
                 df_d['Yahoo Finance'] = df_d['Ticker'].apply(
                     lambda x: f"https://finance.yahoo.com/quote/{x}"
