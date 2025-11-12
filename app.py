@@ -58,7 +58,11 @@ def fetch_stock_data(ticker: str, start_date: datetime, end_date: datetime) -> p
 
 
 def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime, 
-                  scan_start_date: datetime) -> Dict[str, pd.DataFrame]:
+                  scan_start_date: datetime,
+                  price_surge_threshold: float = 0.05,
+                  upward_gap_threshold: float = 0.01,
+                  uptrend_min_days: int = 4,
+                  volume_breakout_threshold: float = 0.10) -> Dict[str, pd.DataFrame]:
     """
     Perform all four scans on the given tickers.
     
@@ -67,6 +71,10 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
         start_date: Start date for data fetch (includes buffer for calculations)
         end_date: End date for data fetch
         scan_start_date: Actual start date for scan results
+        price_surge_threshold: Threshold for price surge scan (default 0.05 = 5%)
+        upward_gap_threshold: Threshold for upward gap scan (default 0.01 = 1%)
+        uptrend_min_days: Minimum days for continuous uptrend (default 4)
+        volume_breakout_threshold: Threshold for volume breakout (default 0.10 = 10%)
     
     Returns:
         Dictionary with scan results
@@ -112,8 +120,8 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
             scan_start_compare = scan_start_compare.tz_localize(data.index.tz)
         scan_data = data[data.index >= scan_start_compare]
         
-        # Perform scans
-        surge_results = scan_price_surge(scan_data)
+        # Perform scans with custom parameters
+        surge_results = scan_price_surge(scan_data, threshold=price_surge_threshold)
         if surge_results:
             tickers_with_surge.add(ticker)
         for date, pct_change, price in surge_results:
@@ -125,7 +133,7 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
                 'Volume': int(scan_data.loc[date, 'Volume']) if date in scan_data.index else 'N/A'
             })
         
-        gap_results = scan_upward_gap(scan_data)
+        gap_results = scan_upward_gap(scan_data, threshold=upward_gap_threshold)
         if gap_results:
             tickers_with_gap.add(ticker)
         for date, gap_pct, price in gap_results:
@@ -137,7 +145,7 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
                 'Volume': int(scan_data.loc[date, 'Volume']) if date in scan_data.index else 'N/A'
             })
         
-        uptrend_results = scan_continuous_uptrend(scan_data)
+        uptrend_results = scan_continuous_uptrend(scan_data, min_days=uptrend_min_days)
         if uptrend_results:
             tickers_with_uptrend.add(ticker)
         for date, num_days, price in uptrend_results:
@@ -149,7 +157,7 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
                 'Volume': int(scan_data.loc[date, 'Volume']) if date in scan_data.index else 'N/A'
             })
         
-        volume_results = scan_volume_breakout(data)
+        volume_results = scan_volume_breakout(data, threshold=volume_breakout_threshold)
         # Filter volume results to scan period
         volume_found = False
         for date, volume_ratio, volume in volume_results:
@@ -205,10 +213,10 @@ def perform_scans(tickers: List[str], start_date: datetime, end_date: datetime,
         })
     
     return {
-        'Scan A: Price Surge (>5%)': pd.DataFrame(scan_a_results),
-        'Scan B: Upward Gap': pd.DataFrame(scan_b_results),
-        'Scan C: Continuous Uptrend (≥4 days)': pd.DataFrame(scan_c_results),
-        'Scan D: Volume Breakout': pd.DataFrame(scan_d_results),
+        f'Scan A: Price Surge (>{price_surge_threshold*100:.1f}%)': pd.DataFrame(scan_a_results),
+        f'Scan B: Upward Gap (>{upward_gap_threshold*100:.1f}%)': pd.DataFrame(scan_b_results),
+        f'Scan C: Continuous Uptrend (≥{uptrend_min_days} days)': pd.DataFrame(scan_c_results),
+        f'Scan D: Volume Breakout (>{volume_breakout_threshold*100:.0f}%)': pd.DataFrame(scan_d_results),
         'Combined: All 4 Criteria': pd.DataFrame(combined_results)
     }
 
@@ -279,6 +287,51 @@ def main():
         
         st.markdown("---")
         
+        # Input 5: Scan Criteria Parameters
+        st.subheader("⚙️ Scan Criteria Settings")
+        
+        # Scan A: Price Surge threshold
+        price_surge_pct = st.number_input(
+            "Price Surge Threshold (%)",
+            min_value=1.0,
+            max_value=20.0,
+            value=5.0,
+            step=0.5,
+            help="Minimum single-day price increase percentage (default: 5%)"
+        )
+        
+        # Scan B: Upward Gap threshold
+        upward_gap_pct = st.number_input(
+            "Upward Gap Threshold (%)",
+            min_value=0.5,
+            max_value=10.0,
+            value=1.0,
+            step=0.5,
+            help="Minimum gap percentage above previous close (default: 1%)"
+        )
+        
+        # Scan C: Continuous Uptrend days
+        uptrend_days = st.number_input(
+            "Continuous Uptrend Days",
+            min_value=2,
+            max_value=20,
+            value=4,
+            step=1,
+            help="Minimum consecutive days of higher closes (default: 4)"
+        )
+        
+        # Scan D: Volume Breakout threshold
+        volume_breakout_pct = st.number_input(
+            "Volume Breakout Threshold (%)",
+            min_value=5.0,
+            max_value=50.0,
+            value=10.0,
+            step=5.0,
+            help="Minimum volume increase above 50-day average (default: 10%)"
+        )
+        
+        st.markdown("---")
+        
         # Scan button
         scan_button = st.button("🚀 Start Scan", type="primary", use_container_width=True)
         
@@ -342,9 +395,18 @@ def main():
         st.info(f"📅 Scan Period: {scan_start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         st.info(f"📊 Data Fetch Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} (includes 55-day buffer)")
         
-        # Perform scans
+        # Perform scans with user-defined parameters
         st.subheader("Scanning in Progress...")
-        results = perform_scans(tickers, start_date, end_date, scan_start_date)
+        results = perform_scans(
+            tickers, 
+            start_date, 
+            end_date, 
+            scan_start_date,
+            price_surge_threshold=price_surge_pct / 100,  # Convert % to decimal
+            upward_gap_threshold=upward_gap_pct / 100,    # Convert % to decimal
+            uptrend_min_days=uptrend_days,
+            volume_breakout_threshold=volume_breakout_pct / 100  # Convert % to decimal
+        )
         
         # Reset scanning state
         st.session_state.scanning = False
