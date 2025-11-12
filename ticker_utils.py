@@ -94,7 +94,8 @@ def get_sp500_tickers() -> List[str]:
         response.raise_for_status()
         
         tables = pd.read_html(StringIO(response.text))
-        sp500_df = tables[0]
+        # Wikipedia has a warning message in table 0, actual data is in table 1
+        sp500_df = tables[1]
         tickers = sp500_df['Symbol'].tolist()
         
         # Clean tickers
